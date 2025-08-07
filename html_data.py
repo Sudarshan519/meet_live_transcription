@@ -131,7 +131,7 @@ html_content2="""<!DOCTYPE html>
                 if (inputType.value === 'meeting_url') {
                     // Call API to start new bot
                     const encodedMeetingUrl = encodeURIComponent(inputValue);
-                    const response = await fetch(`https://transcribe.testir.xyz/start-recall-bot?meeting_url=${encodedMeetingUrl}`, {
+                    const response = await fetch(`https://836e60e6543f.ngrok-free.app/start-recall-bot?meeting_url=${encodedMeetingUrl}&user_id=68934af12e450c3f1c9a2521`, {
                         method: "POST"
                     });
 
@@ -146,10 +146,10 @@ html_content2="""<!DOCTYPE html>
                         throw new Error('No bot_id found in API response.');
                     }
 
-                    wsUrl = `wss://transcribe.testir.xyz/ws_mic/${botId}`;
+                    wsUrl = `wss://836e60e6543f.ngrok-free.app/ws_mic/${botId}`;
                 } else {
                     // Connect directly using bot ID
-                    wsUrl = `wss://transcribe.testir.xyz/ws_mic/${inputValue}`;
+                    wsUrl = `wss://836e60e6543f.ngrok-free.app/ws_mic/${inputValue}`;
                 }
 
                 wsMic = new WebSocket(wsUrl);

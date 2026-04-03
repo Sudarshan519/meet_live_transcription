@@ -253,7 +253,7 @@ def start_recall_bot(meeting_url):
                 "realtime_endpoints": [
                     {
                         "type": "websocket",
-                        "url": "wss://transcrbe.testir.xyz/ws_mic/default-bot",
+                        "url": "wss://transcribe.testir.xyz/ws_mic/default-bot",
                         "events": [
                             "transcript.data",
                             "transcript.partial_data",

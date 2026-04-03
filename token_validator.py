@@ -25,7 +25,7 @@ class TokenReservationClient:
     TOOL_CODE = "P1022"
 
     # Reservation API base URL (should be set in Django settings)
-    BASE_URL =    "https://api.testir.xyz/portaltest/api"
+    BASE_URL =    "https://api.aidistrictagents.com/portaltest/api"
    
 
     # Error message constants
@@ -236,9 +236,9 @@ class TokenReservationClient:
         api_response = None
         result = None
         reservation_id = None
+        url = f"{cls.BASE_URL}/reservations/server/reserve"
 
         try:
-            url = f"{cls.BASE_URL}/reservations/server/reserve"
             cls.logger.info(f"Reserving tokens at URL: {url}")
             resp = requests.post(url, json=payload, headers=cls._headers(), timeout=10)
             cls.logger.info(f"Reserve response status code: {resp.status_code}")
@@ -250,6 +250,7 @@ class TokenReservationClient:
             # Store the full API response for logging
             api_response = {
                 "status_code": resp.status_code,
+                "request_url": url,
                 "response_data": data,
                 "request_payload": payload,
             }
@@ -264,6 +265,7 @@ class TokenReservationClient:
                 reserved_tokens = response_data.get("tokensReserved")
                 estimated_cost = response_data.get("estimatedCost")
                 cls.logger.info(f"✅ Tokens reserved successfully for user {user_id}")
+                cls.logger.info(f"   Reservation URL: {url}")
                 cls.logger.info(f"   Reservation ID: {reservation_id}")
                 cls.logger.info(f"   Reserved Tokens: {reserved_tokens}")
                 cls.logger.info(f"   Estimated Cost: ${estimated_cost}")
@@ -277,6 +279,7 @@ class TokenReservationClient:
             else:
                 error_message = data.get("message", "Unknown error")
                 cls.logger.error(f"❌ Token reservation failed for user {user_id}")
+                cls.logger.error(f"   Reservation URL: {url}")
                 cls.logger.error(f"   Error: {error_message}")
                 cls.logger.error(f"   Status Code: {resp.status_code}")
                 cls.logger.error(f"   Feature ID: {feature_id}")
@@ -301,6 +304,7 @@ class TokenReservationClient:
             api_response = {
                 "error": f"Network error: {str(e)}",
                 "status_code": 500,
+                "request_url": url,
                 "request_payload": payload,
             }
             result = {
@@ -320,6 +324,7 @@ class TokenReservationClient:
             api_response = {
                 "error": f"Reservation error: {str(e)}",
                 "status_code": 500,
+                "request_url": url,
                 "request_payload": payload,
             }
             result = {
@@ -559,9 +564,9 @@ class TokenReservationClient:
 
         api_response = None
         result = None
+        url = f"{cls.BASE_URL}/reservations/server/{reservation_id}/consume"
 
         try:
-            url = f"{cls.BASE_URL}/reservations/server/{reservation_id}/consume"
             cls.logger.info(f"Consuming reservation at URL: {url}")
             resp = requests.put(url, json=payload, headers=cls._headers(), timeout=10)
             print(resp.json())
@@ -577,6 +582,7 @@ class TokenReservationClient:
                 cls.logger.info(
                     f"✅ Tokens consumed successfully for reservation {reservation_id}"
                 )
+                cls.logger.info(f"   Consumption URL: {url}")
                 cls.logger.info(f"   Consumed Tokens: {consumed_tokens}")
                 cls.logger.info(f"   Actual Cost: ${actual_cost}")
                 cls.logger.info(f"   Final Tokens Requested: {final_tokens_consumed}")
@@ -585,6 +591,7 @@ class TokenReservationClient:
                 cls.logger.error(
                     f"❌ Token consumption failed for reservation {reservation_id}"
                 )
+                cls.logger.error(f"   Consumption URL: {url}")
                 cls.logger.error(f"   Error: {error_message}")
                 cls.logger.error(f"   Status Code: {resp.status_code}")
                 cls.logger.error(f"   Final Tokens Requested: {final_tokens_consumed}")
@@ -593,6 +600,7 @@ class TokenReservationClient:
             # Store the full API response for logging
             api_response = {
                 "status_code": resp.status_code,
+                "request_url": url,
                 "response_data": data,
                 "request_payload": payload,
             }
@@ -602,7 +610,7 @@ class TokenReservationClient:
             cls.logger.error(
                 f"Network error consuming reservation {reservation_id}: {str(e)}"
             )
-            cls.logger.error(f"Consume URL: {url}")
+            cls.logger.error(f"Consumption URL: {url}")
             cls.logger.error(f"Consume payload: {payload}")
             cls.logger.error(f"Consume headers: {cls._headers()}")
             cls.logger.error(f"Final tokens consumed: {final_tokens_consumed}")
@@ -612,6 +620,7 @@ class TokenReservationClient:
             api_response = {
                 "error": f"Network error: {str(e)}",
                 "status_code": 500,
+                "request_url": url,
                 "request_payload": payload,
             }
             result = {
@@ -623,7 +632,7 @@ class TokenReservationClient:
             cls.logger.error(
                 f"Unexpected error consuming reservation {reservation_id}: {str(e)}"
             )
-            cls.logger.error(f"Consume URL: {url}")
+            cls.logger.error(f"Consumption URL: {url}")
             cls.logger.error(f"Consume payload: {payload}")
             cls.logger.error(f"Final tokens consumed: {final_tokens_consumed}")
             import traceback
@@ -632,6 +641,7 @@ class TokenReservationClient:
             api_response = {
                 "error": f"Consume error: {str(e)}",
                 "status_code": 500,
+                "request_url": url,
                 "request_payload": payload,
             }
             result = {

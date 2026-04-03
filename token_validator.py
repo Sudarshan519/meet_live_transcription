@@ -25,7 +25,7 @@ class TokenReservationClient:
     TOOL_CODE = "P1022"
 
     # Reservation API base URL (should be set in Django settings)
-    BASE_URL =    "https://api.aidistrictagents.com/portaltest/api"
+    BASE_URL = "https://api.aidistrictagents.com/portaltest/api"
    
 
     # Error message constants

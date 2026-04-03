@@ -22,9 +22,11 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 
 import uvicorn
-from openai import AsyncOpenAI
-from pydantic import BaseModel
+from openai import AsyncOpenAI, BaseModel
+from token_validator import TokenReservationClient
 
+# Initialize token client
+token_client = TokenReservationClient()
 app = FastAPI()
 
 # Set up comprehensive logging
@@ -64,6 +66,14 @@ def setup_logging():
 
 # Initialize logger
 token_logger = setup_logging()
+
+SALES_COACH_PLATFORM_ID = "P1013"
+NEXTGEN_COACH_PLATFORM_ID = "P1033"
+
+
+def get_platform_id(is_outreach: bool) -> str:
+    """Return platform ID based on outreach mode."""
+    return NEXTGEN_COACH_PLATFORM_ID if is_outreach else SALES_COACH_PLATFORM_ID
 
 from fastapi.middleware.cors import CORSMiddleware
 origins = [
@@ -243,7 +253,7 @@ def start_recall_bot(meeting_url):
                 "realtime_endpoints": [
                     {
                         "type": "websocket",
-                        "url": "wss://transcribe.testir.xyz/ws_mic/default-bot",
+                        "url": "wss://test.testir.xyz/transcribe/ws_mic/default-bot",
                         "events": [
                             "transcript.data",
                             "transcript.partial_data",
@@ -324,7 +334,7 @@ async def continuous_token_deduction(bot_id: str, user_id: str, is_outreach: boo
     Args:
         bot_id: The recall bot ID
         user_id: The user ID for token deduction
-        is_outreach: Reserved (outreach still uses per-minute billing via aidistrict API)
+        is_outreach: Whether this is an outreach call
         interval_minutes: How often to deduct tokens (default: 1 minutes = 60 seconds)
     """
     token_logger.info(f"🔄 STARTING continuous token deduction for bot {bot_id}, user {user_id}, outreach: {is_outreach}")
@@ -345,36 +355,21 @@ async def continuous_token_deduction(bot_id: str, user_id: str, is_outreach: boo
                 token_logger.info(f"⏹️ Bot {bot_id} no longer active, stopping token deduction after {cycle_count} cycles")
                 break
                 
-            # Per-minute billing (same API for coaching and outreach; outreach also uses portal pre-check at start)
-            token_api_url = "https://api.aidistrictagents.com/server26/api/token-deduction/deduct-by-minutes"
-            payload = {
-                "userId": user_id,
-                "minutes": interval_minutes
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "x-api-key": os.environ.get("XAPI_KEY")
-            }
+            # Perform token deduction using TokenReservationClient
+            token_logger.info(f"💰 CYCLE {cycle_count}: Attempting to deduct {interval_minutes} minutes for user {user_id}, bot {bot_id}")
             
-            token_logger.info(
-                f"💰 CYCLE {cycle_count}: Attempting to deduct {interval_minutes} minutes for user {user_id}, bot {bot_id} (outreach={is_outreach})"
+            deduct_result = token_client.deduct_tokens(
+                user_id=user_id,
+                feature_id="sales-coaching",
+                custom_deduction=interval_minutes,
+                platform_id=get_platform_id(is_outreach=is_outreach),
             )
-            token_logger.info(f"API Payload: {payload}")
             
-            resp = req.post(token_api_url, data=json.dumps(payload), headers=headers, timeout=10)
-            
-            token_logger.info(f"Token API Response Status: {resp.status_code}")
-            try:
-                response_json = resp.json()
-                token_logger.info(f"Token API Response: {response_json}")
-            except:
-                token_logger.warning(f"Token API Response (raw): {resp.text}")
-            
-            if not resp.ok:
-                token_logger.error(f"❌ CYCLE {cycle_count}: Token deduction failed: {resp.status_code} {resp.text}")
-                token_logger.error(f"⏹️ Stopping bot {bot_id} due to insufficient tokens")
+            if not deduct_result['success']:
+                token_logger.error(f"❌ CYCLE {cycle_count}: Token deduction failed: {deduct_result.get('error')}")
+                token_logger.error(f"⏹️ Stopping bot {bot_id} due to token deduction failure")
                 
-                # End the bot due to insufficient tokens
+                # End the bot due to token deduction failure
                 leave_recall_bot_call(bot_id)
                 
                 # Notify connected clients
@@ -484,28 +479,64 @@ def start_recall_bot_endpoint(meeting_url: str, user_id: str = None, user_email:
     if user_id in active_recall_bots:
         return {"error": f"Recall bot already active for user_id {user_id}"}
 
-    # Add API call before creating bot (token deduction)
+    # Check token availability using TokenReservationClient
     try:
-        token_api_url = "https://api.aidistrictagents.com/server26/api/token-deduction/deduct-by-minutes"
-        payload = {
-            "userId": user_id,
-            "minutes": 0.00000062  # Deduct 0.00000062 minutes on bot creation
-        }
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": os.environ.get("XAPI_KEY")
-        }
-        print(payload)
-        resp = req.post(token_api_url, data=json.dumps(payload), headers=headers, timeout=10)
-        print(resp.json())
-        print(resp.body)
-        print(resp.status_code)
-        if not resp.ok:
-            print(f"Token deduction failed: {resp.status_code} {resp.text}")
-            return JSONResponse(status_code=400,content={"error": "Insufficient token"})
+        token_logger.info(f"Checking token availability for user: {user_id}")
+        check_result = token_client.check_availability(
+            user_id=user_id,
+            feature_id="sales-coaching",
+        )
+        
+        if not check_result['success']:
+            token_logger.error(f"Token availability check failed for user {user_id}: {check_result.get('error')}")
+            return JSONResponse(status_code=400, content={"error": "Token availability check failed"})
+        
+        # Check if user can afford the operation
+        check_data = check_result['data']
+        if not check_data.get('canAfford', False):
+            token_logger.warning(f"User {user_id} cannot afford bot call - insufficient tokens")
+            return JSONResponse(status_code=403, content={"error": "Insufficient tokens for bot call"})
+        
+        token_logger.info(f"Token availability confirmed for user {user_id}")
+        
     except Exception as e:
-        print(f"Exception during token deduction: {e}")
-        return JSONResponse(status_code=500,content={"error": str(e)})
+        token_logger.error(f"Exception during token availability check for user {user_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Token validation error: {str(e)}"})
+
+    # Perform initial token deduction using TokenReservationClient
+    try:
+        token_logger.info(f"Performing initial token deduction for user: {user_id}")
+        deduct_result = token_client.deduct_tokens(
+            user_id=user_id,
+            feature_id="sales-coaching",
+            custom_deduction=1,  # Deduct minimal amount on bot creation
+            platform_id=get_platform_id(is_outreach=False),  # Sales coach platform id
+        )
+        
+        if not deduct_result['success']:
+            token_logger.error(f"Initial token deduction failed for user {user_id}: {deduct_result.get('error')}")
+            return JSONResponse(status_code=400, content={"error": "Initial token deduction failed"})
+        
+        token_logger.info(f"Initial token deduction successful for user {user_id}")
+
+        # Log the generation attempt with sales-coach platform ID
+        try:
+            log_result = token_client.log_generation_attempt(
+                user_id=user_id,
+                email=user_email or "unknown@example.com",
+                platform_id=get_platform_id(is_outreach=False),
+                status="success"  
+            )
+            if log_result.get('success'):
+                token_logger.info(f"Successfully logged sales-coach generation attempt for user {user_id}")
+            else:
+                token_logger.warning(f"Failed to log sales-coach generation attempt: {log_result.get('error')}")
+        except Exception as e:
+            token_logger.warning(f"Exception during generation logging: {e}")
+        
+    except Exception as e:
+        token_logger.error(f"Exception during initial token deduction for user {user_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Token deduction error: {str(e)}"})
 
     try:
         bot_response = start_recall_bot(meeting_url)
@@ -533,8 +564,8 @@ def start_recall_bot_endpoint(meeting_url: str, user_id: str = None, user_email:
 @app.post("/start-call-bot-outreach")
 def start_recall_bot_outreach(meeting_url: str, user_id: str = None, user_email: str = None, module_responses: ModuleResponsesRequest = None):
     """
-    Endpoint to start the Recall Bot for outreach calls.
-    Uses the same aidistrict token check as /start-recall-bot before creating the bot.
+    Endpoint to start the Recall Bot for outreach calls with token validation.
+    Uses the new AI Portal API for token management.
     Accepts module responses for outreach-specific coaching.
     """
     # Extract module responses from request body
@@ -549,27 +580,50 @@ def start_recall_bot_outreach(meeting_url: str, user_id: str = None, user_email:
     if user_id in active_recall_bots:
         return {"error": f"Recall bot already active for user_id {user_id}"}
 
+    # Check token availability using the new API
     try:
-        token_logger.info(f"Outreach startup token check for user: {user_id}")
-        token_api_url = "https://api.aidistrictagents.com/server26/api/token-deduction/deduct-by-minutes"
-        payload = {
-            "userId": user_id,
-            "minutes": 0.00000062,
-        }
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": os.environ.get("XAPI_KEY"),
-        }
-        resp = req.post(token_api_url, data=json.dumps(payload), headers=headers, timeout=10)
-        if not resp.ok:
-            token_logger.error(
-                f"Outreach token check failed for user {user_id}: {resp.status_code} {resp.text}"
-            )
-            return JSONResponse(status_code=400, content={"error": "Insufficient token"})
-        token_logger.info(f"Outreach token check ok for user {user_id}")
+        token_logger.info(f"Checking token availability for outreach user: {user_id}")
+        check_result = token_client.check_availability(
+            user_id=user_id,
+            feature_id="sales-coaching",
+        )
+        
+        if not check_result['success']:
+            token_logger.error(f"Token availability check failed for user {user_id}: {check_result.get('error')}")
+            return JSONResponse(status_code=400, content={"error": "Token availability check failed"})
+        
+        # Check if user can afford the operation
+        check_data = check_result['data']
+        if not check_data.get('canAfford', False):
+            token_logger.warning(f"User {user_id} cannot afford outreach call - insufficient tokens")
+            return JSONResponse(status_code=403, content={"error": "Insufficient tokens for outreach call"})
+        
+        token_logger.info(f"Token availability confirmed for user {user_id}")
+        
     except Exception as e:
-        token_logger.error(f"Exception during outreach token check for user {user_id}: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        token_logger.error(f"Exception during token availability check for user {user_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Token validation error: {str(e)}"})
+
+    # Perform initial token deduction for outreach
+    try:
+        token_logger.info(f"Performing initial token deduction for outreach user: {user_id}")
+        deduct_result = token_client.deduct_tokens(
+            user_id=user_id,
+            feature_id="sales-coaching",
+            custom_deduction=1,
+            platform_id=get_platform_id(is_outreach=True),
+        )
+
+        if not deduct_result['success']:
+            token_logger.error(
+                f"Initial outreach token deduction failed for user {user_id}: {deduct_result.get('error')}"
+            )
+            return JSONResponse(status_code=400, content={"error": "Initial outreach token deduction failed"})
+
+        token_logger.info(f"Initial outreach token deduction successful for user {user_id}")
+    except Exception as e:
+        token_logger.error(f"Exception during initial outreach token deduction for user {user_id}: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Outreach token deduction error: {str(e)}"})
 
     try:
         bot_response = start_recall_bot(meeting_url)
@@ -588,10 +642,24 @@ def start_recall_bot_outreach(meeting_url: str, user_id: str = None, user_email:
             "is_outreach": True,
         }
         
+        # Start continuous token deduction timer
         start_token_deduction_timer(bot_id, user_id, is_outreach=True)
-        token_logger.info(
-            f"Outreach bot started for user {user_id} email={user_email or 'n/a'} bot_id={bot_id}"
-        )
+        
+        # Log the generation attempt
+        try:
+            log_result = token_client.log_generation_attempt(
+                user_id=user_id,
+                email=user_email or "unknown@example.com",
+                platform_id=get_platform_id(is_outreach=True),
+                status="success"
+            )
+            if log_result['success']:
+                token_logger.info(f"Successfully logged outreach generation attempt for user {user_id}")
+            else:
+                token_logger.warning(f"Failed to log outreach generation attempt: {log_result.get('error')}")
+        except Exception as e:
+            token_logger.warning(f"Exception during generation logging: {e}")
+        
         return bot_response
     except Exception as err:
         token_logger.error(f"Error starting outreach bot: {err}")
@@ -1101,4 +1169,7 @@ async def get_audio_processor_js():
     return HTMLResponse(audio_processor_js, media_type="application/javascript")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 9019))
+    # Disable reload in production/Docker environments
+    reload_mode = os.environ.get("RELOAD", "false").lower() == "true"
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=reload_mode)

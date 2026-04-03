@@ -72,8 +72,8 @@ NEXTGEN_COACH_PLATFORM_ID = "P1033"
 
 
 def get_platform_id(is_outreach: bool) -> str:
-    """Return platform ID based on outreach mode."""
-    return NEXTGEN_COACH_PLATFORM_ID if is_outreach else SALES_COACH_PLATFORM_ID
+    """Outreach → sales coach platform; default live coaching → nextgen coach platform."""
+    return SALES_COACH_PLATFORM_ID if is_outreach else NEXTGEN_COACH_PLATFORM_ID
 
 from fastapi.middleware.cors import CORSMiddleware
 origins = [
@@ -253,7 +253,7 @@ def start_recall_bot(meeting_url):
                 "realtime_endpoints": [
                     {
                         "type": "websocket",
-                        "url": "wss://test.testir.xyz/transcribe/ws_mic/default-bot",
+                        "url": "wss://transcrbe.testir.xyz/ws_mic/default-bot",
                         "events": [
                             "transcript.data",
                             "transcript.partial_data",
@@ -485,6 +485,7 @@ def start_recall_bot_endpoint(meeting_url: str, user_id: str = None, user_email:
         check_result = token_client.check_availability(
             user_id=user_id,
             feature_id="sales-coaching",
+            platform_id=get_platform_id(is_outreach=False),
         )
         
         if not check_result['success']:
@@ -510,7 +511,7 @@ def start_recall_bot_endpoint(meeting_url: str, user_id: str = None, user_email:
             user_id=user_id,
             feature_id="sales-coaching",
             custom_deduction=1,  # Deduct minimal amount on bot creation
-            platform_id=get_platform_id(is_outreach=False),  # Sales coach platform id
+            platform_id=get_platform_id(is_outreach=False),
         )
         
         if not deduct_result['success']:
@@ -519,7 +520,7 @@ def start_recall_bot_endpoint(meeting_url: str, user_id: str = None, user_email:
         
         token_logger.info(f"Initial token deduction successful for user {user_id}")
 
-        # Log the generation attempt with sales-coach platform ID
+        # Log the generation attempt (nextgen coach platform for default live bot)
         try:
             log_result = token_client.log_generation_attempt(
                 user_id=user_id,
@@ -528,9 +529,9 @@ def start_recall_bot_endpoint(meeting_url: str, user_id: str = None, user_email:
                 status="success"  
             )
             if log_result.get('success'):
-                token_logger.info(f"Successfully logged sales-coach generation attempt for user {user_id}")
+                token_logger.info(f"Successfully logged nextgen-coach generation attempt for user {user_id}")
             else:
-                token_logger.warning(f"Failed to log sales-coach generation attempt: {log_result.get('error')}")
+                token_logger.warning(f"Failed to log generation attempt: {log_result.get('error')}")
         except Exception as e:
             token_logger.warning(f"Exception during generation logging: {e}")
         
@@ -586,6 +587,7 @@ def start_recall_bot_outreach(meeting_url: str, user_id: str = None, user_email:
         check_result = token_client.check_availability(
             user_id=user_id,
             feature_id="sales-coaching",
+            platform_id=get_platform_id(is_outreach=True),
         )
         
         if not check_result['success']:
@@ -654,7 +656,7 @@ def start_recall_bot_outreach(meeting_url: str, user_id: str = None, user_email:
                 status="success"
             )
             if log_result['success']:
-                token_logger.info(f"Successfully logged outreach generation attempt for user {user_id}")
+                token_logger.info(f"Successfully logged outreach (sales platform) generation for user {user_id}")
             else:
                 token_logger.warning(f"Failed to log outreach generation attempt: {log_result.get('error')}")
         except Exception as e:
